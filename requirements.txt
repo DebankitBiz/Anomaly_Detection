@@ -4,3 +4,4 @@ pandas
 prophet
 scikit-learn
 streamlit
+openpyxl
