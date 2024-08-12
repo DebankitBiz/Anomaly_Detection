@@ -1,7 +1,6 @@
-matplotlib
-numpy
-pandas
-prophet
-python_dateutil
-scikit_learn
-streamlit
+numpy==1.26.0
+matplotlib==3.8.4
+pandas==2.2.2
+prophet==1.1.5
+scikit-learn==1.4.2
+streamlit==1.32.0
