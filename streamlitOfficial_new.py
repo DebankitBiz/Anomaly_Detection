@@ -776,7 +776,7 @@ def main():
                 )
                                         
             col7,col7_1=st.columns(2)
-            with col7:
+            with col7_1:
                 filter_col='Brnd_Name'
                 cat_cols=testingdata.select_dtypes(include=['object']).columns.to_list()
                 print("Fiter Categorical columns",cat_cols)
