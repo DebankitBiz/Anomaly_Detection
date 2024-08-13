@@ -162,6 +162,7 @@ def display_comparison_results(results, data1, data2,Target_col, file1_name, fil
         #st.markdown("### New categorical values found:")
         for item in new_values:
             st.markdown(f"<span style='color:black;'>- {item}</span>", unsafe_allow_html=True)
+    new_values=list(set(new_values))
     
     del_values=[]
     
@@ -174,7 +175,7 @@ def display_comparison_results(results, data1, data2,Target_col, file1_name, fil
     print(" Inside display_comparison_results ",del_in_data2)    
     if del_values:
         #st.markdown("### New categorical values found:")
-        for item in new_values:
+        for item in del_values:
             st.markdown(f"<span style='color:black;'>- {item}</span>", unsafe_allow_html=True)
     
     # Target Value Increase 
