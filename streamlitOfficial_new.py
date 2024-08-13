@@ -5,15 +5,15 @@ import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
 import re
 import numpy as np
-from sklearn.ensemble import GradientBoostingClassifier
 from sklearn.ensemble import GradientBoostingRegressor
 from sklearn.preprocessing import LabelEncoder
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 import io
 import base64 
 import time
-from dateutil.relativedelta import relativedelta
 from prophet import Prophet
+from dateutil.relativedelta import relativedelta
+from sklearn.preprocessing import MinMaxScaler
 
 def set_page_config():
     PAGE_CONFIG = {
@@ -56,26 +56,32 @@ def uploadedFiles():
 
 @st.cache_data
 def compare_data(data1, data2, date_col):
-    today = datetime.now().date()
+
+    data1=data1.copy()
+    data2=data2.copy()
+
+    data1,data2_filtered=filter_data_by_date_range(data1, data2, date_col)
 
     # Ensure the date column is in datetime format
     data1[date_col] = pd.to_datetime(data1[date_col]).dt.date
-    data2[date_col] = pd.to_datetime(data2[date_col]).dt.date
-
-    # Exclude today's data from the comparison
-    data2_excluding_today = data2[data2[date_col] != today]
+    data2_filtered[date_col] = pd.to_datetime(data2_filtered[date_col]).dt.date
 
     # Total rows in each file
     total_rows_file1 = len(data1)
-    total_rows_file2 = len(data2_excluding_today)
+    total_rows_file2 = len(data2)
+    print("Inside Compare Data",total_rows_file2)
 
+    categorical_columns = data2_filtered.select_dtypes(include=['object']).columns.to_list()
+    categorical_columns.append(date_col)
+    
+    new_records = data2_filtered[~data2_filtered[categorical_columns].isin(data1[categorical_columns].to_dict(orient='list')).all(axis=1)]
+    
+    deleted_records=data1[~data1[categorical_columns].isin(data2_filtered[categorical_columns].to_dict(orient='list')).all(axis=1)]
+    
     # Identify rows that are completely missing in file 2 compared to file 1
-    missing_in_file2 = data1[~data1.apply(tuple, 1).isin(data2_excluding_today.apply(tuple, 1))]
+    Changes_in_recent_File=data2_filtered[~data2_filtered.apply(tuple, 1).isin(data1.apply(tuple, 1))]
+    Changes_in_old_File = data1[~data1.apply(tuple, 1).isin(data2_filtered.apply(tuple, 1))]
 
-    # Identify rows that have changed between file 1 and file 2
-    merged = pd.merge(data1, data2_excluding_today, on=list(data1.columns), how='outer', indicator=True)
-    changes = merged[merged['_merge'] == 'right_only']
-    changes = changes.iloc[:, :len(data1.columns)]  # Remove the extra columns
 
     # Column comparison
     yesterday_columns = set(data1.columns)
@@ -89,19 +95,36 @@ def compare_data(data1, data2, date_col):
     return {
         'total_rows_file1': total_rows_file1,
         'total_rows_file2': total_rows_file2,
-        'changes': changes,
-        'missing_in_file2': missing_in_file2,
-        'column_comparison': column_comparison
+        'Changes_in_recent_File': Changes_in_recent_File,
+        'Changes_in_old_File': Changes_in_old_File,
+        'new_records':new_records,
+        'deleted_records':deleted_records
     }
 
 
+
 # Function to display comparison results
+@st.cache_data
+def filter_data_by_date_range(df1, df2, date_column):
+    df1=df1.copy()
+    df2=df2.copy()
+    # Find the overlapping date range
+    max_start_date = max(df1[date_column].min(), df2[date_column].min())
+    min_end_date = min(df1[date_column].max(), df2[date_column].max())
+
+    # Filter both DataFrames to the overlapping date range
+    df1_filtered = df1[(df1[date_column] >= max_start_date) & (df1[date_column] <= min_end_date)]
+    df2_filtered = df2[(df2[date_column] >= max_start_date) & (df2[date_column] <= min_end_date)]
+
+    return df1_filtered, df2_filtered
+
 
 @st.cache_data
-def display_comparison_results(results, data1, data2, file1_name, file2_name):
+def display_comparison_results(results, data1, data2,Target_col, file1_name, file2_name):
     data1 = data1.copy()
     data2 = data2.copy()
-
+    data1,data2=filter_data_by_date_range(data1, data2, 'Date') 
+    
     # Convert the 'Date' column to datetime if it's not already
     data2['Date'] = pd.to_datetime(data2['Date']).dt.date
     data1['Date'] = pd.to_datetime(data1['Date']).dt.date
@@ -120,169 +143,135 @@ def display_comparison_results(results, data1, data2, file1_name, file2_name):
     # Identify new brands in data2 that are not present in data1
     Delta_Brand = len(set(data2['Brnd_Name'].unique()) - set(data1['Brnd_Name'].unique()))
     #Delta_Indicator = set(data2['Prscrbr_Type'].unique()) - set(data1['Prscrbr_Type'].unique())
-    Comparison_df = pd.DataFrame({
-    "Analysis": [
-        "Addition of New Records",
-        "Changes detected between the two files",
-        "Deletion of records",
-        "New Brands"
-    ],
-    "Value": [
-        new_rows_count,
-        results['changes'].shape[0],
-        results['missing_in_file2'].shape[0],
-        Delta_Brand
-    ]
-    })
-
-    st.dataframe(Comparison_df)    
+    categorical_columns = data1.select_dtypes(include=['object']).columns.to_list()
+    
+    if 'Date' in categorical_columns:
+        categorical_columns.remove('Date')
         
+    print(" Inside display_comparison_results",categorical_columns)
+    # Initialize a list to hold new values
+    new_values = []
+
+    for col in categorical_columns:
+            new_in_data2 = set(data2[col].astype(str).unique()) - set(data1[col].astype(str).unique())
+            if new_in_data2:
+                new_values.append(f"In column '{col}', new values: {', '.join(new_in_data2)}")
+
+        # Display results in Streamlit if there are new values
+    if new_values:
+        #st.markdown("### New categorical values found:")
+        for item in new_values:
+            st.markdown(f"<span style='color:black;'>- {item}</span>", unsafe_allow_html=True)
+    
+    del_values=[]
+    
+    for col in categorical_columns:
+            del_in_data2 = set(data1[col].astype(str).unique()) - set(data2[col].astype(str).unique())
+            if del_in_data2:
+                del_values.append(f"In column '{col}', deleted values: {', '.join(new_in_data2)}")
+
+        # Display results in Streamlit if there are new values
+    print(" Inside display_comparison_results ",del_in_data2)    
+    if del_values:
+        #st.markdown("### New categorical values found:")
+        for item in new_values:
+            st.markdown(f"<span style='color:black;'>- {item}</span>", unsafe_allow_html=True)
+    
+    # Target Value Increase 
+    categorical_columns.append('Date')
+    grouped_data1 = data1.groupby(categorical_columns)[Target_col].sum().reset_index()
+    grouped_data2 = data2.groupby(categorical_columns)[Target_col].sum().reset_index()
+
+    # Merge data1 and data2 on the categorical columns
+    merged_data = pd.merge(grouped_data1, grouped_data2, on=categorical_columns, how='outer', suffixes=('_data1', '_data2'))
+
+    # Fill NaN values with 0 (assuming missing categories should be counted as zero)
+    merged_data.fillna(0, inplace=True)
+
+    # Calculate differences
+    merged_data['Difference'] = merged_data[Target_col + '_data2'] - merged_data[Target_col + '_data1']
+
+    # Find records where there are changes
+    changes = merged_data[merged_data['Difference'] != 0]
+
+    # Count the number of changes
+    num_changes = changes.shape[0]
+
+    # Display results
+    st.markdown(f"<span style='color:black;'>- Number of Rows for which the {Target_col} increases: {num_changes}</span>", unsafe_allow_html=True)
+    print(changes)
+    
+    if num_changes > 0:
+        st.dataframe(changes)    
+        
+    
+    
+    
 
 
-
-# Function to find new entries
-def find_new_entries(data1, data2, removeColumns=['Value']):
-    new_entries = {}
-    yesterdayColumns = set(data1.columns)
-    todayColumns = set(data2.columns)
-
-    for removeCol in removeColumns:
-        yesterdayColumns.remove(removeCol)
-
-    for column in yesterdayColumns:
-        if column in data1.columns and column in data2.columns:
-            unique_df1 = set(data1[column].unique())
-            unique_df2 = set(data2[column].unique())
-            new_entries[column] = unique_df2 - unique_df1
-        else:
-            new_entries[column] = 'Column not found in both dataframes'
-
-    return new_entries
-
-
-
-# Function to display new entries
-def display_new_entries(new_entries, file1_name, file2_name):
-    for column, new_vals in new_entries.items():
-        if isinstance(new_vals, set) and len(new_vals) > 0:
-            st.write(f"\nNew {column}s in {file2_name} not present in {file1_name}:")
-            for val in new_vals:
-                st.write(f"- {val}")
-        elif isinstance(new_vals, str):
-            st.write(f"\n{column}: {new_vals}")
-        else:
-            st.write(f"\nNo new {column}s found.")
 
 @st.cache_resource           
-def timePlusBoosting(trainingdata,testingdata):
-    data = trainingdata.copy()
-    data = data[(data['Date'] >= '2023-04-01')].reset_index()
-    data['Date'] = pd.to_datetime(data['Date'])
-    data = data.rename(columns={'Date': 'ds', 'Tot_30day_Fills': 'y'})
+def timePlusBoosting(trainingdata,testingdata,target_col):
+    trainingdata=trainingdata.copy()
+    testingdata=testingdata.copy()
     
-    # Create empty DataFrames to store thresholds
-    normal_thresholds_df = pd.DataFrame(columns=['Brnd_Name', 'upper_threshold', 'lower_threshold'])
-    thresholds_df_std = pd.DataFrame(columns=['Brnd_Name', 'upper_threshold', 'lower_threshold'])
-    
-    brandList = data['Brnd_Name'].unique()
-    
-    for brandName in brandList:
-        brand_data = data[data['Brnd_Name'] == brandName].copy()
-        brand_data = brand_data.sort_values(by='ds')
-        
-        model = Prophet()
-        model.fit(brand_data)
-        
-        future = model.make_future_dataframe(periods=1, freq='D')
-        forecast = model.predict(future)
-        
-        merged = brand_data.merge(forecast[['ds', 'yhat', 'yhat_lower', 'yhat_upper']], on='ds', how='left')
-        
-        merged['error'] = merged['y'] - merged['yhat']
-        merged['uncertainty'] = merged['yhat_upper'] - merged['yhat_lower']
-        
-        ############################
-        merged_std = merged.copy()
-        
-        window_size = 30  # You can adjust this window size
-        merged_std['rolling_mean'] = merged_std['y'].rolling(window=window_size).mean()
-        merged_std['rolling_std'] = merged_std['y'].rolling(window=window_size).std()
-        
-        # Dynamic thresholds
-        merged_std['dynamic_upper_threshold'] = merged_std['rolling_mean'] + 2 * merged_std['rolling_std']
-        merged_std['dynamic_lower_threshold'] = merged_std['rolling_mean'] - 2 * merged_std['rolling_std']
-        
-        merged_new_std = merged_std[['ds', 'Brnd_Name', 'y', 'yhat', 'dynamic_lower_threshold', 'dynamic_upper_threshold']]
-        
-        upper_threshold_std = merged_new_std['dynamic_upper_threshold'].mean()
-        lower_threshold_std = merged_new_std['dynamic_lower_threshold'].mean()
-        
-        brand_thresholds_std = pd.DataFrame([{
-            'Brnd_Name': brandName,
-            'upper_threshold': upper_threshold_std,
-            'lower_threshold': lower_threshold_std
-        }])
-        
-        thresholds_df_std = pd.concat([thresholds_df_std, brand_thresholds_std], ignore_index=True)
-        
-        #############################
-        
-        merged_new = merged[['ds', 'Brnd_Name', 'y', 'yhat', 'yhat_lower', 'yhat_upper']]
-        
-        upper_threshold = merged_new['yhat_upper'].mean()
-        lower_threshold = merged_new['yhat_lower'].mean()
-        
-        brand_thresholds_normal = pd.DataFrame([{
-            'Brnd_Name': brandName,
-            'upper_threshold': upper_threshold,
-            'lower_threshold': lower_threshold
-        }])
-        
-        normal_thresholds_df = pd.concat([normal_thresholds_df, brand_thresholds_normal], ignore_index=True)
-
-    
-    yesterday_df = trainingdata.copy()
-    today_df = testingdata.copy()
-
-    yesterday_df = yesterday_df[['Date','Brnd_Name','Tot_30day_Fills']]
-    today_df = today_df[['Date','Brnd_Name','Tot_30day_Fills']]
-    
-    yesterday_df = yesterday_df[yesterday_df['Date'] >= '2023-04-01'].reset_index()
-    yesterday_df.drop(['index'],axis=1,inplace=True)
-    
-    today_df = today_df[today_df['Date'] >= '2023-05-01'].reset_index()
-    today_df.drop(['index'],axis=1,inplace=True)
+    #filter the columns which ever is required
+    trainingdata = trainingdata[['Date','Brnd_Name','Tot_Clms','Tot_Day_Suply','Tot_Drug_Cst','Tot_30day_Fills']]
+    testingdata = testingdata[['Date','Brnd_Name','Tot_Clms','Tot_Day_Suply','Tot_Drug_Cst','Tot_30day_Fills']]
 
     # One-hot encoding
-    yesterday_df_encoded = pd.get_dummies(yesterday_df, columns=['Brnd_Name'])
-    today_df_encoded = pd.get_dummies(today_df, columns=['Brnd_Name'])
-    
-    today_df_encoded = today_df_encoded.reindex(columns=yesterday_df_encoded.columns, fill_value=0)
-    
-    
-    X_train = yesterday_df_encoded.drop(['Date', 'Tot_30day_Fills'], axis=1)
-    y_train = yesterday_df_encoded['Tot_30day_Fills']
-    
-    
-    X_test = today_df_encoded.drop(['Date', 'Tot_30day_Fills'], axis=1)
-    y_test = today_df_encoded['Tot_30day_Fills']
-    
-    
+    trainingdata_encoded = pd.get_dummies(trainingdata, columns=['Brnd_Name'])
+    testingdata_encoded = pd.get_dummies(testingdata, columns=['Brnd_Name'])
+
+    testingdata_encoded = testingdata_encoded.reindex(columns=trainingdata_encoded.columns, fill_value=0)
+
+    scaler = MinMaxScaler()
+
+    trainingdata_encoded[['Tot_Clms', 'Tot_Day_Suply', 'Tot_Drug_Cst']] = scaler.fit_transform(trainingdata_encoded[['Tot_Clms', 'Tot_Day_Suply', 'Tot_Drug_Cst']])
+    testingdata_encoded[['Tot_Clms', 'Tot_Day_Suply', 'Tot_Drug_Cst']] = scaler.fit_transform(testingdata_encoded[['Tot_Clms', 'Tot_Day_Suply', 'Tot_Drug_Cst']])
+
+    X_train = trainingdata_encoded.drop(['Date', 'Tot_30day_Fills'], axis=1)
+    y_train = trainingdata_encoded[target_col]
+
+
+    X_test = testingdata_encoded.drop(['Date', 'Tot_30day_Fills'], axis=1)
+    y_test = testingdata_encoded[target_col]
+
+
     gbr = GradientBoostingRegressor(random_state=42)
     gbr.fit(X_train, y_train)
-    
-    
-    y_pred = gbr.predict(X_test)
-    today_df['predicted']=y_pred
-    residuals = np.abs(y_test - y_pred)
-    today_df['residuals']=residuals
-    
-    merged_df = pd.merge(today_df, thresholds_df_std, on=['Brnd_Name'], how='left')
-    merged_df['pred']=0
-    merged_df.loc[(merged_df['residuals'] > merged_df['upper_threshold']) | (merged_df['residuals'] < merged_df['lower_threshold']), 'pred'] = 1  
 
-    
-    return merged_df, thresholds_df_std, normal_thresholds_df
+
+    y_pred = gbr.predict(X_test)
+    testingdata['predicted']=y_pred
+    residuals = np.abs(y_test - y_pred)
+    testingdata['residuals']=residuals
+
+    #Threshold
+    threshold_data = []
+
+    for brand in testingdata['Brnd_Name'].unique():
+        brand_df = testingdata[testingdata['Brnd_Name'] == brand]
+        brand_df = brand_df.reset_index()
+        mean_residuals = np.mean(brand_df['residuals'])
+        std_residuals = np.std(brand_df['residuals'])
+
+        # Threshold: mean + 2 * std deviation
+        threshold = mean_residuals + (2) * std_residuals
+        
+        # Append the brand and its threshold to the list
+        threshold_data.append({'Brnd_Name': brand, 'threshold': threshold})
+
+        # Mark anomalies
+        testingdata.loc[testingdata['Brnd_Name'] == brand, 'pred'] = (testingdata['residuals'] > threshold).astype(int)
+
+    threshold_df = pd.DataFrame(threshold_data)
+
+    #all anomalies in this variable
+    anomaliesGetStd = testingdata[testingdata['pred']==True].reset_index()
+    anomaliesGetStd.drop(['index'],axis=1,inplace=True)
+            
+    return testingdata
  
 def get_datetime_columns(df):
     # Get columns with datetime format
@@ -306,6 +295,7 @@ def brand_Comparison_Over_Time(trainingdata, testingdata, Target_Col):
     training_grouped = trainingDataBrandGraph.groupby(['time_period', 'Brnd_Name'])[Target_Col].sum().reset_index()
 
     # Testing Data Processing
+    testingdata=testingdata.copy()
     testingdata['Date'] = pd.to_datetime(testingdata['Date'])
 
     if testingdata['Date'].dt.year.nunique() > 1:
@@ -318,7 +308,7 @@ def brand_Comparison_Over_Time(trainingdata, testingdata, Target_Col):
     testing_grouped = testingdata.groupby(['time_period', 'Brnd_Name'])[Target_Col].sum().reset_index()
 
     # Merge the training and testing data on time_period and brand
-    merged_data = pd.merge(training_grouped, testing_grouped, on=['time_period', 'Brnd_Name'], suffixes=('_train', '_test'))
+    merged_data = pd.merge(training_grouped, testing_grouped, on=['time_period', 'Brnd_Name'], suffixes=('_train', '_test'),how='left')
 
     # Calculate percentage change
     merged_data['pct_change'] = ((merged_data[f'{Target_Col}_test'] - merged_data[f'{Target_Col}_train']) / merged_data[f'{Target_Col}_train']) * 100
@@ -448,7 +438,7 @@ def Anomalies_Brand(testingData,filter_Col):
     # Annotate the bars with values inside the graph
     for bar in bars:
         width = bar.get_width()
-        ax.text(width - 0.5, bar.get_y() + bar.get_height() / 2, str(int(width)), va='center', ha='right', color='black', fontsize=40)
+        ax.text(width - 0.5, bar.get_y() + bar.get_height() / 2, str(int(width)), va='top', ha='left', color='black', fontsize=35)
     # Hide the x-axis
     ax.set_xticks([])
     ax.set_xticklabels([])
@@ -547,9 +537,11 @@ def main():
 
         datetime_columns = get_datetime_columns(today_df)
         
-        st.sidebar.subheader("Choose Date Columns")
+        num_cols=today_df.select_dtypes(include=['int64','float64']).columns.to_list()
+        Target_col=st.sidebar.selectbox("Select target Column",options=num_cols)
+        #st.sidebar.subheader("Choose Date Columns")
         selected_date_col = st.sidebar.selectbox("Select date column", datetime_columns)
-        st.sidebar.subheader("Choose Period")
+        #st.sidebar.subheader("Choose Period")
         min_date = today_df[selected_date_col].min()
         reference_date=today_df[selected_date_col].max()
         diff_months = (reference_date.year - min_date.year) * 12 + reference_date.month - min_date.month
@@ -607,7 +599,10 @@ def main():
             
             period_number=int(re.findall(r'\d+', selected_period_col)[0])
             data1=filter_data_by_period(data1, selected_date_col, selected_period_col)
-            testingdata, thresholds_df_std, normal_thresholds_df=timePlusBoosting(data1,data2)
+            #print
+            testingdataML=timePlusBoosting(data1,data2,Target_col)
+            testingdata=today_df.copy()
+            testingdata.loc[:,'pred']=testingdataML['pred'].values
             print("Model Predicted Data\n",testingdata.head())
 
             results = compare_data(data1, data2, selected_date_col)
@@ -650,7 +645,7 @@ def main():
                     unsafe_allow_html=True
                 )
             with col3:
-                total_rows_file1 = testingdata[testingdata['pred']==1].shape[0]  # dynamically get the value
+                total_rows_file1 = testingdata[testingdata['pred']==True].shape[0]  # dynamically get the value
                 print("Number of Anomolous Data",total_rows_file1)
                 st.markdown(
                     f"""
@@ -664,7 +659,7 @@ def main():
                 )
 
             with col4:
-                total_rows_file1 = results['total_rows_file1']  # dynamically get the value
+                total_rows_file1 = results['Changes_in_recent_File'].shape[0]  # dynamically get the value
                 st.markdown(
                     f"""
                                         <div class='column-box' style='text-align: left;'>
@@ -682,7 +677,7 @@ def main():
 
             with col5:
                 data1['Response'] = 0 
-                fig = brand_Comparison_Over_Time(data1, data2, 'Tot_30day_Fills')
+                fig = brand_Comparison_Over_Time(data1, data2, Target_col)
                 img_base64 = fig_to_base64(fig)
                 #fig.set_size_inches(10, 4)
 
@@ -783,12 +778,10 @@ def main():
             col7,col7_1=st.columns(2)
             with col7:
                 filter_col='Brnd_Name'
-                filter_col=st.selectbox("Brand",options=['Brnd_Name','Indication'])
-                
-                if filter_col=='Índication':
-                    fig=Anomalies_Brand(testingdata,filter_col) 
-                else:
-                    fig=Anomalies_Brand(testingdata,filter_col)  
+                cat_cols=testingdata.select_dtypes(include=['object']).columns.to_list()
+                print("Fiter Categorical columns",cat_cols)
+                filter_col=st.selectbox("Brand",options=cat_cols)
+                fig=Anomalies_Brand(testingdata,filter_col)  
                     #st.pyplot(fig)
                 plt.show()
                 img3_base64 = fig_to_base64(fig)
@@ -830,24 +823,22 @@ def main():
                 ) 
                         
                        
-            col8=st.columns(1)[0]
+            col8,col9=st.columns(2)
             with col8:
                 st.markdown('<p style="color:black;font-size: 15px;font-weight: bold;" >Comparison with previous file (Tabular)</p>', unsafe_allow_html=True)
-                display_comparison_results(results, data1, data2, "Previous File", "Current File")
+                display_comparison_results(results, data1, data2,Target_col, "Previous File", "Current File")
                 # st.write('new_entries')
                 # new_entries = find_new_entries(data1, data2)
                 # display_new_entries(new_entries, "Previous File", "Current File")
-            col9=st.columns(1)[0]    
             with col9:
                 st.markdown(f'''<p style="color:black;font-size: 15px;font-weight: bold;" >Anamolies ranges at Brand level </p>''', unsafe_allow_html=True)
                 
                 if  filter_col=='Prscrbr_Type':
-                    des_df=Data_Profile(testingdata, filter_col,'Tot_30day_Fills')
+                    des_df=Data_Profile(testingdata, filter_col,Target_col)
                     
                 else:
-                     des_df=Data_Profile(testingdata, filter_col,'Tot_30day_Fills')  
-                des_df=pd.merge(des_df, thresholds_df_std, on=['Brnd_Name'])
-                des_df=pd.merge(des_df, normal_thresholds_df, on=['Brnd_Name'])
+                     des_df=Data_Profile(testingdata, filter_col,Target_col)  
+                
                        
                 # des_df=Data_Profile(testingdata, 'Brnd_Name')        
                 #time.sleep(5)     
@@ -864,14 +855,27 @@ def main():
 
             col1, col2 = st.columns(2)
             with col1:
-                st.markdown('<p class="title-font" style="color:black" ><b>Deleted from the Current File<b></p>', unsafe_allow_html=True)
+                st.markdown('<p class="title-font" style="color:black" ><b>Previous Load<b></p>', unsafe_allow_html=True)
                 results = compare_data(yesterday_df, today_df, selected_date_col)
-                st.dataframe(results['missing_in_file2'])
+                st.dataframe(results['Changes_in_old_File'])
 
             with col2:
-                st.markdown('<p class="title-font" style="color:black" ><b>Changes between two files<b></p>', unsafe_allow_html=True)
-                st.dataframe(results['changes'])
+                st.markdown('<p class="title-font" style="color:black" ><b>Recent Load<b></p>', unsafe_allow_html=True)
+                st.dataframe(results['Changes_in_recent_File'])
             st.session_state.tabular_button=False
+            
+            st.markdown('<p class="title-font" style="color:black" ><b>New Rows in Recent file<b></p>', unsafe_allow_html=True)
+            if results['new_records'].shape[0] ==0:
+                st.markdown('<p  style="color:black" ><i>There is no new rows inserted in  the Recent file</i></p>', unsafe_allow_html=True)
+            else:
+                st.dataframe(results['new_records'])
+
+            
+            st.markdown('<p class="title-font" style="color:black" ><b>Deleted Rows from Recent file<b></p>', unsafe_allow_html=True)
+            if results['deleted_records'].shape[0] ==0:
+                st.markdown('<p  style="color:black" ><i>There is no rows deleted from the Recent file</i></p>', unsafe_allow_html=True)
+            else:
+                st.dataframe(results['deleted_records'])
 
             
     else:
