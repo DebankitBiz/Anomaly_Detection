@@ -659,7 +659,7 @@ def main():
                 )
 
             with col4:
-                total_rows_file1 = results['Changes_in_recent_File'].shape[0]  # dynamically get the value
+                total_rows_file1 = results['Changes_in_old_File'].shape[0]  # dynamically get the value
                 st.markdown(
                     f"""
                                         <div class='column-box' style='text-align: left;'>
