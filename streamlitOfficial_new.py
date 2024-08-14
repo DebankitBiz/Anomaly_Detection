@@ -777,7 +777,7 @@ def main():
                 )
 
             with col4:
-                total_rows_file1 = add_commas(results['Changes_in_old_File'].shape[0])  # dynamically get the value
+                total_rows_file1 = add_commas(results['Changes_in_old_File'].shape[0]+results['deleted_records'].shape[0]+results['new_records'].shape[0])  # dynamically get the value
                 st.markdown(
                     f"""
                                         <div class='column-box' style='text-align: left;'>
