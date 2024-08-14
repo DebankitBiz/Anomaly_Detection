@@ -34,7 +34,7 @@ def uploadedFiles():
     st.sidebar.markdown("""
             <style>
             .sidebar .sidebar-content {
-                background-color: #EEF4FE; /* Yellow background */
+                background-color: #373D50; /* Yellow background */
                 color: black; /* Text color for contrast */
             }
             .sidebar .sidebar-header {
@@ -54,6 +54,52 @@ def uploadedFiles():
     today_file = st.sidebar.file_uploader("Upload today's file", type=["csv", "xlsx"])
     return file_type, yesterday_file, today_file
 
+
+def sanitychecks(data1,data2):
+    R = 0
+    col1 = data1.columns.to_list()
+    col2 = data2.columns.to_list()
+
+    with st.container():
+        st.markdown("<h2 style='text-align: center;color:black;'>Sanity Checks</h2>", unsafe_allow_html=True)
+        st.markdown("<p style='text-align: center;color:red;'>Please correct this Error before the Training the Model</p>", unsafe_allow_html=True)
+        #st.markdown("<div style='background-color: #f0f0f0; padding: 20px; border-radius: 10px;'>", unsafe_allow_html=True)
+        datatype_changes = {}
+        for column in col1:
+            dtype1 = data1[column].dtype
+            if column in col2:
+                dtype2 = data2[column].dtype
+                print("column",column,"data type 1",dtype1,dtype2)
+                if dtype1 != dtype2:
+                    datatype_changes[column] = (dtype1, dtype2)
+                    print('Data Type got changed')
+                    R= 1
+            
+        if datatype_changes:
+            st.markdown("<p style='text-align: left;color:black;'>Data type changes detected:</p>", unsafe_allow_html=True)
+            for column, (dtype1, dtype2) in datatype_changes.items():
+                st.markdown(f"<p style='text-align: left;color:black;'>Column '{column}': {dtype1} (file1) -> {dtype2} (file2)</p>", unsafe_allow_html=True)
+                st.markdown("<p style='text-align: left;color:black;'>No data type changes detected between the columns.</p>", unsafe_allow_html=True)
+                
+            # Check for differences in presence
+        if set(col1) != set(col2):
+            R=1
+            st.markdown("<p style='text-align: left;color:black;'>The column names are different between the two files.</p>", unsafe_allow_html=True)
+            st.markdown(f"<p style='text-align: left;color:black;'>Columns in file1 but not in file2: {set(col1) - set(col2)}</p>", unsafe_allow_html=True)
+            st.markdown(f"<p style='text-align: left;color:black;'>Columns in file2 but not in file1: {set(col2) - set(col1)} </p>", unsafe_allow_html=True)
+            
+        # Check for differences in order
+        if col1 != col2:
+            R=1
+            st.markdown("<p style='text-align: left;color:black;'>The columns are not in the same order.</p>", unsafe_allow_html=True)
+            for i, (col1_name, col2_name) in enumerate(zip(col1, col2)):
+                if col1_name != col2_name:
+                    st.markdown(f"<p style='text-align: left;color:black;'>Difference at position {i}: '{col1_name}' (file1) vs '{col2_name}' (file2)</p>", unsafe_allow_html=True)
+    
+        
+        
+    return R    
+    
 @st.cache_data
 def compare_data(data1, data2, date_col):
 
@@ -73,15 +119,31 @@ def compare_data(data1, data2, date_col):
 
     categorical_columns = data2_filtered.select_dtypes(include=['object']).columns.to_list()
     categorical_columns.append(date_col)
+    categorical_columns=['Date','Prscrbr_NPI','Brnd_Name']
     
-    new_records = data2_filtered[~data2_filtered[categorical_columns].isin(data1[categorical_columns].to_dict(orient='list')).all(axis=1)]
+    old_tuples = data1[categorical_columns].apply(tuple, axis=1)
+    new_tuples = data2_filtered[categorical_columns].apply(tuple, axis=1)
     
-    deleted_records=data1[~data1[categorical_columns].isin(data2_filtered[categorical_columns].to_dict(orient='list')).all(axis=1)]
+    new_records = data2_filtered[~new_tuples.isin(old_tuples)].reset_index(drop=True)
+    new_records.index = new_records.index + 1
+    
+    
+    deleted_records = data1[~old_tuples.isin(new_tuples)].reset_index(drop=True)
+    deleted_records.index = deleted_records.index + 1
     
     # Identify rows that are completely missing in file 2 compared to file 1
     Changes_in_recent_File=data2_filtered[~data2_filtered.apply(tuple, 1).isin(data1.apply(tuple, 1))]
     Changes_in_old_File = data1[~data1.apply(tuple, 1).isin(data2_filtered.apply(tuple, 1))]
+    
+    
+    Changes_in_recent_File=Changes_in_recent_File[~Changes_in_recent_File.apply(tuple,1).isin(new_records.apply(tuple,1))]
+    Changes_in_old_File=Changes_in_old_File[~Changes_in_old_File.apply(tuple,1).isin(deleted_records.apply(tuple,1))]
+    
+    Changes_in_old_File=Changes_in_old_File.reset_index(drop=True)
+    Changes_in_old_File.index=Changes_in_old_File.index+1
 
+    Changes_in_recent_File=Changes_in_recent_File.reset_index(drop=True)
+    Changes_in_recent_File.index=Changes_in_recent_File.index+1
 
     # Column comparison
     yesterday_columns = set(data1.columns)
@@ -128,7 +190,8 @@ def display_comparison_results(results, data1, data2,Target_col, file1_name, fil
     # Convert the 'Date' column to datetime if it's not already
     data2['Date'] = pd.to_datetime(data2['Date']).dt.date
     data1['Date'] = pd.to_datetime(data1['Date']).dt.date
-
+    
+    
     # Get the maximum date from data1 (yesterday's data)
     yesterdayMaxDate = data1['Date'].max()
 
@@ -139,11 +202,51 @@ def display_comparison_results(results, data1, data2,Target_col, file1_name, fil
     # Find new rows in data2 that are not in data1
     new_rows = data2.merge(data1, how='left', indicator=True).query('_merge == "left_only"').drop('_merge', axis=1)
     new_rows_count = new_rows.shape[0]
+    new_records=results['new_records']
+    
+    Changes_in_recent_File= results['Changes_in_recent_File'].copy()
+    Changes_in_old_File =results['Changes_in_old_File'].copy()
+        
+    
+    st.markdown(f"<span style='color:black;'>- No. of Records Added in Recent File : {results['new_records'].shape[0]}</span>", unsafe_allow_html=True)
+    st.markdown(f"<span style='color:black;'>- No. Records Deleted from the Recent file: {results['deleted_records'].shape[0]}</span>", unsafe_allow_html=True)
+    st.markdown(f"<span style='color:black;'>- No. Records Modified in the Recent file: {results['Changes_in_recent_File'].shape[0]}</span>", unsafe_allow_html=True)
+    st.markdown(f"<span style='color:black;'>- No. New NPI added in the Recent file: {new_records['Prscrbr_NPI'].nunique()}</span>", unsafe_allow_html=True)
+    st.markdown(f"<span style='color:black;'>- No. NPI deleted in the Recent file: {results['deleted_records']['Prscrbr_NPI'].nunique()}</span>", unsafe_allow_html=True)
+    
+    key_columns = ['Date', 'Prscrbr_NPI', 'Brnd_Name']
 
+    # Create composite keys
+    Changes_in_old_File['Composite_Key'] = Changes_in_old_File[key_columns].astype(str).agg(','.join, axis=1)
+    Changes_in_recent_File['Composite_Key'] = Changes_in_recent_File[key_columns].astype(str).agg(','.join, axis=1)
+
+    # Set the composite key as the index
+    Changes_in_old_File.set_index('Composite_Key', inplace=True)
+    Changes_in_recent_File.set_index('Composite_Key', inplace=True)
+
+    # Drop the key columns from comparison
+    # Changes_in_old_File.drop(columns=['Composite_Key'], inplace=True)
+    # Changes_in_recent_File.drop(columns=['Composite_Key'], inplace=True)
+    
+    comparison = Changes_in_old_File != Changes_in_recent_File
+
+    # Iterate through the rows to identify mismatches
+    for index, row in comparison.iterrows():
+        if row.any():  # If any column in the row is different
+            mismatches = row[row].index.tolist()
+            for col in mismatches:
+                old_value = Changes_in_old_File.loc[index, col]
+                new_value = Changes_in_recent_File.loc[index, col]
+                date,NPI,Brand=index.split(",")
+                if not (pd.isna(old_value) and pd.isna(new_value)):
+                    st.markdown(f"<span style='color:black;'>On '{date}' for NPI {NPI}, Column '{col}': Value changed from {old_value} to {new_value}</span>", unsafe_allow_html=True)
+
+    
     # Identify new brands in data2 that are not present in data1
     Delta_Brand = len(set(data2['Brnd_Name'].unique()) - set(data1['Brnd_Name'].unique()))
     #Delta_Indicator = set(data2['Prscrbr_Type'].unique()) - set(data1['Prscrbr_Type'].unique())
     categorical_columns = data1.select_dtypes(include=['object']).columns.to_list()
+    categorical_columns=['Brnd_Name','Drug Type','Prscrbr_Type']
     
     if 'Date' in categorical_columns:
         categorical_columns.remove('Date')
@@ -169,7 +272,7 @@ def display_comparison_results(results, data1, data2,Target_col, file1_name, fil
     for col in categorical_columns:
             del_in_data2 = set(data1[col].astype(str).unique()) - set(data2[col].astype(str).unique())
             if del_in_data2:
-                del_values.append(f"In column '{col}', deleted values: {', '.join(new_in_data2)}")
+                del_values.append(f"In column '{col}', deleted values: {', '.join(del_in_data2)}")
 
         # Display results in Streamlit if there are new values
     print(" Inside display_comparison_results ",del_in_data2)    
@@ -204,12 +307,9 @@ def display_comparison_results(results, data1, data2,Target_col, file1_name, fil
     
     if num_changes > 0:
         st.dataframe(changes)    
+    
+    return 0
         
-    
-    
-    
-
-
 
 @st.cache_resource           
 def timePlusBoosting(trainingdata,testingdata,target_col):
@@ -467,13 +567,19 @@ def tabular_changed():
     if st.session_state.tabular_button==False:
         st.session_state.tabular_button = True
         st.session_state.summary_button = False                           
+
+def add_commas(number):
+    # Convert the number to a string and format it with commas
+    
+    return "{:,}".format(number)
   
 def main():
     selected_date_col=''
     st.markdown("""
         <style>
         .sidebar .sidebar-content {
-            background-color: #FF0000;
+            background-color: #373D50;
+            color:white;
         }
         .stApp {
             background-color: #E3F2FD;
@@ -557,18 +663,8 @@ def main():
         selected_period_col = st.sidebar.selectbox("Select Period column", period_options)
         
         button_train_model=st.sidebar.button("Train Model",help="Train Model on Yesterday's Last "+selected_period_col,on_click=train_changed)
-        
-        
-        
-    if yesterday_file and today_file and st.session_state.button_train_model :
-        
-        button_container = st.container()
-        with button_container:
-            col1, col2 = st.columns([1, 2])
-            with col1:
-                summary_button = st.button("  Summary Dashboard  ", key="summary", help="Show summary dashboard",on_click=summary_changed)
-            with col2:
-                tabular_button = st.button("  Tabular Dashboard    " , key="tabular", help="Show tabular data",on_click=tabular_changed)
+    
+    if  yesterday_file and today_file:
         
         if file_type == "CSV":
             data1 = pd.read_csv(yesterday_file)
@@ -576,6 +672,26 @@ def main():
         elif file_type == "Excel":
             data1 = pd.read_excel(yesterday_file)
             data2 = pd.read_excel(today_file)
+        
+        R=sanitychecks(data1,data2)
+        if R==1:
+            return
+        
+        
+        
+    if yesterday_file and today_file and st.session_state.button_train_model :
+        
+        
+        button_container = st.container()
+        with button_container:
+            col1, col2 = st.columns([1, 2])
+            with col2:
+                summary_button = st.button("  Anomaly   ", key="summary", help="Show summary dashboard",on_click=summary_changed)
+            with col1:
+                tabular_button = st.button("  Restatement    " , key="tabular", help="Show tabular data",on_click=tabular_changed)
+        
+        
+            
                        
         print("Summary Button Status",st.session_state.summary_button)
         print("Train Button Status",st.session_state.button_train_model)            
@@ -605,12 +721,13 @@ def main():
             testingdata=today_df.copy()
             testingdata.loc[:,'pred']=testingdataML['pred'].values
             print("Model Predicted Data\n",testingdata.head())
-
+            
+             
             results = compare_data(data1, data2, selected_date_col)
 
             col1, col2, col3, col4 = st.columns(4)
             with col1:
-                total_rows_file1 = results['total_rows_file1']  # dynamically get the value
+                total_rows_file1 = add_commas(results['total_rows_file1'])  # dynamically get the value
                 st.markdown(
                     f"""
                      <style>
@@ -635,7 +752,7 @@ def main():
                 # st.write(f"Total rows in previous file: {results['total_rows_file1']}")
 
             with col2:
-                total_rows_file2 = results['total_rows_file2']  # dynamically get the value
+                total_rows_file2 = add_commas(results['total_rows_file2'])  # dynamically get the value
                 st.markdown(
                     f"""
                                         <div class='column-box' style='text-align: left;'>
@@ -646,7 +763,7 @@ def main():
                     unsafe_allow_html=True
                 )
             with col3:
-                total_rows_file1 = testingdata[testingdata['pred']==True].shape[0]  # dynamically get the value
+                total_rows_file1 = add_commas(testingdata[testingdata['pred']==True].shape[0])  # dynamically get the value
                 print("Number of Anomolous Data",total_rows_file1)
                 st.markdown(
                     f"""
@@ -660,7 +777,7 @@ def main():
                 )
 
             with col4:
-                total_rows_file1 = results['Changes_in_old_File'].shape[0]  # dynamically get the value
+                total_rows_file1 = add_commas(results['Changes_in_old_File'].shape[0])  # dynamically get the value
                 st.markdown(
                     f"""
                                         <div class='column-box' style='text-align: left;'>
