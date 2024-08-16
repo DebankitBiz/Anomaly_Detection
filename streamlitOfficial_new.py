@@ -434,7 +434,7 @@ def brand_Comparison_Over_Time(trainingdata, testingdata, Target_Col):
         ax2.plot(brand_data['time_period'].astype(str), brand_data[f'{Target_Col}_train'], marker='x', markersize=5, linestyle='--', label=f'Previous - {brand}')
 
     # Place the legend inside the plot
-    plt.legend(fontsize=6, loc='center left', bbox_to_anchor=(1,0.8))
+    #plt.legend(fontsize=6, loc='center left', bbox_to_anchor=(1,0.8))
 
     # Set axis labels and title
    # ax2.set_xlabel('Time Period', fontsize=10)
@@ -530,6 +530,7 @@ def filter_data_by_period(data, date_column, period):
 def Anomalies_Brand(testingData,filter_Col):
     # Filter and count anomalous records
     anomalousData = testingData[testingData['pred'] == 1].groupby([filter_Col])['pred'].count().reset_index()
+    anomalousData = anomalousData.sort_values(by='pred', ascending=False).head(10)
     anomalousData.rename(columns={'pred': 'Total_Anomalous'}, inplace=True)
 
     # Convert columns to integers
@@ -905,8 +906,9 @@ def main():
             with col7_1:
                 filter_col='Brnd_Name'
                 cat_cols=testingdata.select_dtypes(include=['object']).columns.to_list()
+                brand_index = cat_cols.index("Brnd_Name")
                 print("Fiter Categorical columns",cat_cols)
-                filter_col=st.selectbox("Brand",options=cat_cols)
+                filter_col=st.selectbox("Brand",options=cat_cols,index=brand_index)
                 fig=Anomalies_Brand(testingdata,filter_col)  
                     #st.pyplot(fig)
                 plt.show()
