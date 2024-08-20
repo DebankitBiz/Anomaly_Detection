@@ -90,20 +90,40 @@ def sanitychecks(data1, data2):
             st.markdown("<p style='text-align: center;color:red;'>Please correct this Error before Training the Model</p>", unsafe_allow_html=True)
 
             if datatype_changes:
-                st.markdown("<p style='text-align: left;color:black;'>Data type changes detected:</p>", unsafe_allow_html=True)
-                for column, (dtype1, dtype2) in datatype_changes.items():
-                    st.markdown(f"<p style='text-align: left;color:black;'>Column '{column}': {dtype1} (file1) -> {dtype2} (file2)</p>", unsafe_allow_html=True)
-            
+                st.markdown("""
+                    <div style='background-color: #f9f9f9; padding: 10px; border-radius: 5px; margin-top:2rem; '>
+                        <p style='text-align: left; color: black; font-weight: bold;margin-bottom:5px '>Data type changes detected:</p>
+                        {}
+                    </div>
+                    """.format(
+                        "".join([f"<p style='text-align: left; color: black;margin:0 '>Column '{column}': {dtype1} (file1) -> {dtype2} (file2)</p>"
+                                for column, (dtype1, dtype2) in datatype_changes.items()])
+                    ), unsafe_allow_html=True
+                )
+
             if column_diff_detected:
-                st.markdown("<p style='text-align: left;color:black;'>The column names are different between the two files.</p>", unsafe_allow_html=True)
-                st.markdown(f"<p style='text-align: left;color:black;'>Columns in file1 but not in file2: {set(col1) - set(col2)}</p>", unsafe_allow_html=True)
-                st.markdown(f"<p style='text-align: left;color:black;'>Columns in file2 but not in file1: {set(col2) - set(col1)}</p>", unsafe_allow_html=True)
+                if len(set(col2)-set(col1)) >0:
+                    content=f"<p style='text-align: left;color:black;margin:0'>Columns in file2 but not in file1: {set(col2) - set(col1)}</p>"
+                if len(set(col1)-set(col2)) >0:
+                    content+=f"<p style='text-align: left;color:black;margin:0'>Columns in file1 but not in file2: {set(col1) - set(col2)}</p>"
+                    
+                st.markdown(f"""
+                    <div style='background-color: #f9f9f9; padding: 10px; border-radius: 5px; margin-top:2rem; '>
+                        <p style='text-align: left; color: black; font-weight: bold;margin-bottom:5px'>The column names are different between the two files.</p>
+                        {content}
+                    </div>
+                    """
+                , unsafe_allow_html=True)
             
             if column_order_diff_detected:
-                st.markdown("<p style='text-align: left;color:black;'>The columns are not in the same order.</p>", unsafe_allow_html=True)
-                for i, (col1_name, col2_name) in enumerate(zip(col1, col2)):
-                    if col1_name != col2_name:
-                        st.markdown(f"<p style='text-align: left;color:black;'>Difference at position {i}: '{col1_name}' (file1) vs '{col2_name}' (file2)</p>", unsafe_allow_html=True)
+                st.markdown("""
+                            <div style='background-color: #f9f9f9; padding: 10px; border-radius: 5px; margin-top:2rem; '>
+                            <p style='text-align: left; color: black; font-weight: bold;margin-bottom:5px '>The columns are not in the same order.</p>
+                            {}
+                            </div>""".format("".join([f"<p style='text-align: left;color:black;margin:0'>Difference at position {i}: '{col1_name}' (file1) vs '{col2_name}' (file2)</p>" 
+                                                      for i, (col1_name, col2_name) in enumerate(zip(col1, col2))   if col1_name != col2_name  ]))
+                        ,unsafe_allow_html=True)
+               
     
     return R
     
