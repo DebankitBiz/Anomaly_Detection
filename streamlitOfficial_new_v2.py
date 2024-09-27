@@ -45,6 +45,27 @@ class EmptyDataFrameError(Exception):
         self.message = message
         super().__init__(self.message)
         
+def highlight_pass_fail(val):
+    if val == 'Pass':
+        color = 'White'
+        text_color = 'Green'
+        symbol = '\u25cf'  # Green filled circle
+    elif val == 'Fail':
+        color = 'White'
+        text_color = 'Red'
+        symbol = '\u25cf'  # Red filled circle
+    elif val == 'Pass.':
+        color = 'White'
+        text_color = '#ED7D31'
+        symbol = '\u25cf'  # Red filled circle
+    else:
+        color = 'white'
+        text_color = 'black'
+        symbol = '\u25cf'  # Black filled circle
+    return f'background-color: {color}; color: {text_color}; text-align: center; padding: 2px 0px 2px 0px; content: "{symbol}"'
+  
+
+
 
 def set_page_config():
     PAGE_CONFIG = {
@@ -124,6 +145,52 @@ def get_datetime_columns(df):
     # Get columns with datetime format
     datetime_columns = [col for col in df.columns if pd.api.types.is_datetime64_any_dtype(df[col])]
     return datetime_columns
+
+
+@st.cache_data
+def structural_change(yesterday_df, today_df):
+    
+    # Compare numerical columns
+    yesterday_numerical = set(yesterday_df.select_dtypes(include=['int', 'float']).columns)
+    today_numerical = set(today_df.select_dtypes(include=['int', 'float']).columns)
+    added_columns = today_numerical - yesterday_numerical
+    removed_columns = yesterday_numerical - today_numerical
+    status_num = "Fail" if added_columns or removed_columns else "Pass"
+    comment_num = f"Added: {', '.join(added_columns)}. Removed: {', '.join(removed_columns)}." if added_columns or removed_columns else "No numerical columns added or removed."
+    
+    # Create DataFrame for numerical columns
+    df_num = pd.DataFrame({"Status": [status_num], "Comment": [comment_num]}, index=['Numerical Columns'])  
+    
+    # Compare categorical columns
+    yesterday_categorical = set(yesterday_df.select_dtypes(include=['object']).columns)
+    today_categorical = set(today_df.select_dtypes(include=['object']).columns)
+    added_columns = today_categorical - yesterday_categorical
+    removed_columns = yesterday_categorical - today_categorical
+    status_cat = "Fail" if added_columns or removed_columns else "Pass"
+    comment_cat = f"Added: {', '.join(added_columns)}. Removed: {', '.join(removed_columns)}." if added_columns or removed_columns else "No categorical columns added or removed."
+    
+    # Create DataFrame for categorical columns
+    df_cat = pd.DataFrame({"Status": [status_cat], "Comment": [comment_cat]}, index=['Categorical Columns'])
+    
+    # Compare date columns
+    yesterday_date = set(yesterday_df.select_dtypes(include=['datetime', 'datetime64']).columns)
+    today_date = set(today_df.select_dtypes(include=['datetime', 'datetime64']).columns)
+    added_columns = today_date - yesterday_date
+    removed_columns = yesterday_date - today_date
+    status_date = "Fail" if added_columns or removed_columns else "Pass"
+    comment_date = f"Added: {', '.join(added_columns)}. Removed: {', '.join(removed_columns)}." if added_columns or removed_columns else "No date columns added or removed."
+    
+    # Create DataFrame for date columns
+    df_date = pd.DataFrame({"Status": [status_date], "Comment": [comment_date]}, index=['Date Columns'])
+    
+    # Concatenate all DataFrames
+    df = pd.concat([df_num, df_cat, df_date])
+  
+    styled_df = df.style.applymap(highlight_pass_fail)
+    
+    st.dataframe(styled_df, width=1500) 
+
+
 
 
 def restatement_changed():
@@ -323,7 +390,7 @@ def timePlusBoosting(trainingdata,testingdata,target_col,from_month):
             lambda row: any(row[col] == "Unknown" for col in categorical_cols),
             axis=1
         )
-        today_df_filtered.to_csv("Unknown Conversion.csv")
+        #today_df_filtered.to_csv("Unknown Conversion.csv")
         today_df_filtered['month'] = pd.to_datetime(today_df_filtered['Date']).dt.to_period('M')
         # Ensure all rows are initially marked as non-anomalous
   
@@ -1194,53 +1261,49 @@ def main():
                         unsafe_allow_html=True
                     )
                     
-                OVKPI1,OVKPI2=st.columns(2)
+                OVKPI1=st.columns(1)[0]
                 with OVKPI1:
-                    st.markdown(f'<p class="title-font" style="color:black;margin-top:80px;" ><b>Last Month Data - {min(yesterday_df['Date']).date()} to {max(yesterday_df['Date']).date()}   <b></p>', unsafe_allow_html=True)
-                    df_summary = pd.DataFrame({
-                        "Row Number": [str(yesterday_df.shape[0])],
-                        "Column Number": [str(yesterday_df.shape[1])],
-                        "Numerical Columns": [
-                            str(len(yesterday_df.select_dtypes(include=['int', 'float']).columns))
-                        ],
-                        "Categorical Columns": [
-                            str(len(yesterday_df.select_dtypes(include=['object', 'category']).columns))
-                        ],
-                        "Date Columns": [
-                            str(len(yesterday_df.select_dtypes(include=['datetime', 'datetime64']).columns))
-                        ]
-                    }, index=["Last Data"])
-                    st.dataframe(df_summary,width=500)
+                    
+                    st.markdown(f'<p class="title-font" style="color:black;margin-top:80px;" ><b>Structural Changes in the Current File - {min(today_df['Date']).date()} to {max(today_df['Date']).date()}   <b></p>', unsafe_allow_html=True)
+                    structural_change(yesterday_df,today_df)
+                    
+                    # df_summary = pd.DataFrame({
+                    #     "Row Number": [str(yesterday_df.shape[0])],
+                    #     "Column Number": [str(yesterday_df.shape[1])],
+                    #     "Numerical Columns": [
+                    #         str(len(yesterday_df.select_dtypes(include=['int', 'float']).columns))
+                    #     ],
+                    #     "Categorical Columns": [
+                    #         str(len(yesterday_df.select_dtypes(include=['object', 'category']).columns))
+                    #     ],
+                    #     "Date Columns": [
+                    #         str(len(yesterday_df.select_dtypes(include=['datetime', 'datetime64']).columns))
+                    #     ]
+                    # }, index=["Last Data"])
+                    #st.dataframe(df_summary,width=500)
                 
-                with OVKPI2:
-                    st.markdown(f'<p class="title-font" style="color:black;margin-top:80px;" ><b>Current Month Data - {min(today_df['Date']).date()} to {max(today_df['Date']).date()}  <b></p>', unsafe_allow_html=True)
-                    df_summary = pd.DataFrame({
-                        "Row Number": [str(today_df.shape[0])],
-                        "Column Number": [str(today_df.shape[1])],
-                        "Numerical Columns": [
-                            str(len(today_df.select_dtypes(include=['int', 'float']).columns))
-                        ],
-                        "Categorical Columns": [
-                            str(len(today_df.select_dtypes(include=['object', 'category']).columns))
-                        ],
-                        "Date Columns": [
-                            str(len(today_df.select_dtypes(include=['datetime', 'datetime64']).columns))
-                        ]
-                    }, index=["Current Data"])
-                    st.dataframe(df_summary,width=500)
+                # with OVKPI2:
+                #     st.markdown(f'<p class="title-font" style="color:black;margin-top:80px;" ><b>Current Month Data - {min(today_df['Date']).date()} to {max(today_df['Date']).date()}  <b></p>', unsafe_allow_html=True)
+                #     df_summary = pd.DataFrame({
+                #         "Row Number": [str(today_df.shape[0])],
+                #         "Column Number": [str(today_df.shape[1])],
+                #         "Numerical Columns": [
+                #             str(len(today_df.select_dtypes(include=['int', 'float']).columns))
+                #         ],
+                #         "Categorical Columns": [
+                #             str(len(today_df.select_dtypes(include=['object', 'category']).columns))
+                #         ],
+                #         "Date Columns": [
+                #             str(len(today_df.select_dtypes(include=['datetime', 'datetime64']).columns))
+                #         ]
+                #     }, index=["Current Data"])
+                #     st.dataframe(df_summary,width=500)
                 
                 
                 st.markdown('<p class="title-font" style="color:black;margin-top:80px;" ><b>Preview of the Data <b></p>', unsafe_allow_html=True)
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.markdown('<p class="title-font" style="color:black;margin-top:20px;" ><b>Last Month Data<b></p>', unsafe_allow_html=True)
-                    yesterday_df.index=yesterday_df.index+1
-                    preview_yesterday=yesterday_df.copy()
-                    preview_yesterday['Prscrbr_NPI']=preview_yesterday['Prscrbr_NPI'].astype(str)
-                    preview_yesterday['Prscrbr_NPI']=preview_yesterday['Prscrbr_NPI'].astype(str)
-                    st.dataframe(preview_yesterday.head(20))
-
-                with col2:
+                
+                
+                with st.expander("Expand to see the preview of the data"):
                     st.markdown('<p class="title-font" style="color:black;margin-top:20px;" ><b>Current Month Data<b></p>', unsafe_allow_html=True)
                     today_df.index=today_df.index+1
                     preview_today=today_df.copy()
